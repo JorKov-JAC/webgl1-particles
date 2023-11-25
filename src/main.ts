@@ -1,17 +1,32 @@
+/** The square root of {@link PARTICLE_COUNT}. */
 const SQRT_PARTICLE_COUNT = 32
+/** The number of particles to process and draw. */
 const PARTICLE_COUNT = SQRT_PARTICLE_COUNT * SQRT_PARTICLE_COUNT
+/** The size of each particle as a multiplier of screen length. */
 const PARTICLE_SIZE = .025;
 
+/** The WebGL context. */
 const gl = (document.getElementById("particles")! as HTMLCanvasElement).getContext("webgl")!
 
+/**
+ * Creates a WebGL shader.
+ * 
+ * @param gl The WebGL context to create the shader for.
+ * @param type The shader's type ({@link WebGLRenderingContext.VERTEX_SHADER} or {@link WebGLRenderingContext.FRAGMENT_SHADER}).
+ * @param src The shader's glsl source code.
+ * @return A shader for {@link gl}.
+*/
 function createShader(gl: WebGLRenderingContext, type: GLenum, src: string) {
 	const shader = gl.createShader(type)!
 	gl.shaderSource(shader, src)
 	gl.compileShader(shader)
 
+	// Check if compilation succeeded
 	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+		// Log the source code with line numbers
 		const prettySrc = src.split(/\n/).map((e, i) => `${i+1} ${e}`).join("\n")
 		console.group((type === gl.VERTEX_SHADER ? "Vertex" : "Fragment") + " Shader:\n" + prettySrc)
+		// Log the error
 		console.log(gl.getShaderInfoLog(shader))
 		console.groupEnd()
 	}
@@ -19,55 +34,127 @@ function createShader(gl: WebGLRenderingContext, type: GLenum, src: string) {
 	return shader
 }
 
+/**
+ * Creates a WebGL program.
+ * 
+ * @param gl The WebGL context to create the program for.
+ * @param vSrc The glsl source code for the vertex shader.
+ * @param fSrc The glsl source code for the fragment shader.
+ * @return A program for {@link gl}.
+ */
 function createProgram(gl: WebGLRenderingContext, vSrc: string, fSrc: string) {
 	const program = gl.createProgram()!
 	gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vSrc))
 	gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fSrc))
 	gl.linkProgram(program)
 
+	// Check if linking succeeded
 	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		// Log the error
 		console.log(gl.getProgramInfoLog(program))
 	}
 
 	return program
 }
 
-const aLocs = Symbol()
-function getAttribLoc(gl: WebGLRenderingContext, attribName: string) {
+/**
+ * Attribute locations are cached onto {@link WebGLProgram} objects themselves
+ * through this symbol.
+ */
+const attribLocationSymbol = Symbol()
+/**
+ * Gets the location of an attribute from the current program.
+ * 
+ * @param gl The WebGL context whose current program we'll get the location
+ * from.
+ * @param attribName The name of the attribute to get.
+ * @returns The attribute's location.
+ */
+function getAttribLoc(gl: WebGLRenderingContext, attribName: string): number {
 	const program = gl.getParameter(gl.CURRENT_PROGRAM)
-	program[aLocs] ??= []
-	program[aLocs][attribName] ??= gl.getAttribLocation(program, attribName)
 
-	return program[aLocs][attribName]
+	// Ensure cache exists on the program:
+	program[attribLocationSymbol] ??= []
+	// Ensure location exists within the cache, otherwise look it up:
+	program[attribLocationSymbol][attribName] ??= gl.getAttribLocation(program, attribName)
+
+	// Return cached location
+	return program[attribLocationSymbol][attribName]
 }
 
-const uLocs = Symbol()
+/**
+ * Uniform locations are cached onto {@link WebGLProgram} objects themselves
+ * through this symbol.
+ */
+const uniformLocationSymbol = Symbol()
+/**
+ * Gets the location of a uniform from the current program.
+ * 
+ * @param gl The WebGL context whose current program we'll get the location
+ * from.
+ * @param uniformName The name of the uniform to get.
+ * @returns The uniform's location.
+ */
 function getUniformLoc(gl: WebGLRenderingContext, uniformName: string) {
 	const program = gl.getParameter(gl.CURRENT_PROGRAM)
-	program[uLocs] ??= []
-	program[uLocs][uniformName] ??= gl.getUniformLocation(program, uniformName)
 
-	return program[uLocs][uniformName]
+	// Ensure cache exists on the program:
+	program[uniformLocationSymbol] ??= []
+	// Ensure location exists within the cache, otherwise look it up:
+	program[uniformLocationSymbol][uniformName] ??= gl.getUniformLocation(program, uniformName)
+
+	// Return cached location
+	return program[uniformLocationSymbol][uniformName]
 }
 
+/**
+ * Creates a random value for a {@link Uint8ClampedArray}.
+ */
 function randClampUint8() {
+	// Rounding/clamping will occur when the value is stored in the array:
 	return Math.random() * 256 - .5
 }
 
+/**
+ * Creates a texture suitable for storing particle data.
+ * 
+ * @param gl The WebGL context to create the texture for.
+ */
 function createParticleTexture(gl: WebGLRenderingContext) {
 	const texture = gl.createTexture()
 	gl.bindTexture(gl.TEXTURE_2D, texture)
 
+	// Set texture parameters (wrapping, filtering)
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
 	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
 
-	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, SQRT_PARTICLE_COUNT * 2, SQRT_PARTICLE_COUNT, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8ClampedArray(([...new Array(PARTICLE_COUNT).keys()]).flatMap(() => [randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8()])))
+	// Generate random data
+	const texelData = []
+	for (let i = 0; i < PARTICLE_COUNT; ++i) {
+		// Every particle needs 6 random numbers
+		texelData.push(...[randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8(), randClampUint8()])
+	}
+
+	gl.texImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGB,
+		SQRT_PARTICLE_COUNT * 2,
+		SQRT_PARTICLE_COUNT,
+		0,
+		gl.RGB,
+		gl.UNSIGNED_BYTE,
+		new Uint8ClampedArray(texelData)
+	)
 
 	return texture
 }
 
+/**
+ * The WebGL program for drawing the particles.
+ */
 const renderProgram = createProgram(gl, `
 uniform sampler2D u_particles;
 
@@ -106,6 +193,10 @@ void main() {
 }
 `)
 
+/**
+ * A helper WebGL program which draws the internal state of the particle data
+ * texture.
+ */
 const renderInternalsProgram = createProgram(gl, `
 attribute vec2 a_pos;
 
@@ -121,6 +212,9 @@ void main() {
 `)
 gl.bindAttribLocation(renderInternalsProgram, 0, "a_pos")
 
+/**
+ * The WebGL program for updating the particles.
+ */
 const updateProgram = createProgram(gl, `
 attribute vec2 a_pos;
 
@@ -153,52 +247,75 @@ void main() {
 	
 	vec2 highPos = floor(pv.xy * 255.) / 255.;
 	vec2 lowPos = (pv.xy - highPos) * 256.;
-	// vec2 lowPos = fract(pv.xy * 255.);
 	gl_FragColor = vec4(highPos.xy, lowPos.x, 1.) * (1. - odd) + vec4(pv.zw, lowPos.y, 1.) * odd;
 }
 `)
 gl.bindAttribLocation(updateProgram, 0, "a_pos")
 
-const screenVertBuff = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1])
+/** A buffer of "triangle strip" vertex data which covers the entire texture. */
+// Every pair of numbers is a coordinate on the texture. The order starts
+// counter-clockwise in case backface culling is ever enabled.
+// (-1, -1): Bottom left
+// ( 1, -1): Bottom right
+// (-1,  1): Top left
+// ( 1,  1): Top right
+// When rendering as a triangle strip, we end up with these triangles:
+// Bottom left, bottom right, top left (with counter-clockwise "winding")
+// Bottom right, top left, top right (with clockwise "winding")
+const fullTextureVertexData = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1])
 
-const particleBuff = gl.createBuffer()
-gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
-gl.bufferData(gl.ARRAY_BUFFER, screenVertBuff, gl.STATIC_DRAW)
+/**
+ * The VBO for rendering to the particle data.
+ */
+const updateVertexBuffer = gl.createBuffer()
+gl.bindBuffer(gl.ARRAY_BUFFER, updateVertexBuffer)
+gl.bufferData(gl.ARRAY_BUFFER, fullTextureVertexData, gl.STATIC_DRAW)
 gl.useProgram(updateProgram)
 gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
 gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
 
-const idxBuff = gl.createBuffer()
-gl.bindBuffer(gl.ARRAY_BUFFER, idxBuff)
+/**
+ * The VBO for rendering particles to the screen.
+ * 
+ * Every particle has 2 triangles, so 6 entries each.
+ * The actual data in every vertex is just the particle's index * 4, plus the
+ * index of that vertex's corner within the particle.
+ */
+const particleVertexIndexBuffer = gl.createBuffer()
+gl.bindBuffer(gl.ARRAY_BUFFER, particleVertexIndexBuffer)
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([...new Array(PARTICLE_COUNT).keys()].flatMap((_e, i) => { i *= 4; return [i, i+1, i+2, i+2, i+1, i+3] })), gl.STATIC_DRAW)
 gl.useProgram(renderProgram)
 gl.enableVertexAttribArray(getAttribLoc(gl, "a_idx"))
 gl.vertexAttribPointer(getAttribLoc(gl, "a_idx"), 1, gl.FLOAT, false, 0, 0)
 
-const textures:WebGLTexture[] = []
-const frameBuffers:WebGLFramebuffer[] = []
+/** The textures used for storing particle data. */
+const particleDataTextures:WebGLTexture[] = []
+/** The frame buffers for {@link particleDataTextures}. */
+const particleDataFrameBuffers:WebGLFramebuffer[] = []
 let tickCount = 0
 for (const i of [0,1]) {
 	const texture = createParticleTexture(gl)!
-	textures[i] = texture
+	particleDataTextures[i] = texture
 
 	const fbo = gl.createFramebuffer()!
-	frameBuffers[i] = fbo
+	particleDataFrameBuffers[i] = fbo
 	gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
 	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
 }
 
 gl.clearColor(0,0,0,1)
 function renderLoop() {
-	gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffers[tickCount % frameBuffers.length]!)
+	// Update particle data
+	gl.bindFramebuffer(gl.FRAMEBUFFER, particleDataFrameBuffers[tickCount % particleDataFrameBuffers.length]!)
 	gl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2, SQRT_PARTICLE_COUNT)
 	gl.useProgram(updateProgram)
-	gl.bindTexture(gl.TEXTURE_2D, textures[(tickCount + 1) % textures.length]!)
-	gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
+	gl.bindTexture(gl.TEXTURE_2D, particleDataTextures[(tickCount + 1) % particleDataTextures.length]!)
+	gl.bindBuffer(gl.ARRAY_BUFFER, updateVertexBuffer)
 	gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
 	gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
+	// Render particles
 	gl.bindFramebuffer(gl.FRAMEBUFFER, null)
 	gl.viewport(0, 0, gl.canvas.width, gl.canvas.height)
 	gl.clear(gl.COLOR_BUFFER_BIT)
@@ -206,20 +323,21 @@ function renderLoop() {
 	gl.blendEquation(gl.FUNC_ADD)
 	gl.blendFunc(gl.ONE, gl.ONE)
 	gl.useProgram(renderProgram)
-	gl.bindTexture(gl.TEXTURE_2D, textures[tickCount % textures.length]!)
-	gl.bindBuffer(gl.ARRAY_BUFFER, idxBuff)
+	gl.bindTexture(gl.TEXTURE_2D, particleDataTextures[tickCount % particleDataTextures.length]!)
+	gl.bindBuffer(gl.ARRAY_BUFFER, particleVertexIndexBuffer)
 	gl.enableVertexAttribArray(getAttribLoc(gl, "a_idx"))
 	gl.vertexAttribPointer(getAttribLoc(gl, "a_idx"), 1, gl.FLOAT, false, 0, 0)
 	gl.drawArrays(gl.TRIANGLES, 0, PARTICLE_COUNT * 6)
 	gl.disable(gl.BLEND)
 
+	// Display data texture in the corner
 	gl.bindFramebuffer(gl.FRAMEBUFFER, null)
 	gl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2 * 4, SQRT_PARTICLE_COUNT * 4)
 	gl.useProgram(renderInternalsProgram)
-	gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
+	gl.bindBuffer(gl.ARRAY_BUFFER, updateVertexBuffer)
 	gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
 	gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
-	gl.bindTexture(gl.TEXTURE_2D, textures[tickCount % textures.length]!)
+	gl.bindTexture(gl.TEXTURE_2D, particleDataTextures[tickCount % particleDataTextures.length]!)
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
 	++tickCount
