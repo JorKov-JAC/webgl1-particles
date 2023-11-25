@@ -1,6 +1,8 @@
 # WebGL 1 GPU Particles
 This is a proof-of-concept for GPU accelerated particles using WebGL 1 without extensions.
 
+You can see it in action [here](https://jorkov-jac.github.io/projects/gpu-particles)!
+
 ## What are GPU Particles?
 First, let's cover how simple bouncing particles might be handled on the CPU: You store a series of particles in an array. Each particle stores position information and velocity. Every frame, you loop through the array of particles and update each one, shifting their position based on their velocity and inverting their velocity whenever they reach the edge of the screen. This array is stored in RAM. After updating the particles, you draw them. This means that the CPU (which updates data) needs to send information about the particles to the GPU (which renders the particles), and this can present a bottleneck since the bandwidth between the CPU and GPU is limited. Furthermore, the GPU is designed for processing large amounts of data; wouldn't it be great if we could leverage its parallel processing power to do all of these particle calculations?
 
@@ -30,3 +32,6 @@ Every frame:
 - Using the new texture, we render every particle at their position.
     - Every particle is a square, so there are 4 vertices each.
     - Then a fragment shader renders a circular particle within that square.
+
+# Building
+Run `npm i` followed by `npx tsc`.
