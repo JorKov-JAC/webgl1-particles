@@ -2,8 +2,7 @@ const SQRT_PARTICLE_COUNT = 32
 const PARTICLE_COUNT = SQRT_PARTICLE_COUNT * SQRT_PARTICLE_COUNT
 const PARTICLE_SIZE = .025;
 
-const fGl = (document.getElementById("fParticles")! as HTMLCanvasElement).getContext("webgl")!
-const vGl = (document.getElementById("vParticles")! as HTMLCanvasElement).getContext("webgl2")!
+const gl = (document.getElementById("particles")! as HTMLCanvasElement).getContext("webgl")!
 
 function createShader(gl: WebGLRenderingContext, type: GLenum, src: string) {
 	const shader = gl.createShader(type)!
@@ -69,7 +68,7 @@ function createParticleTexture(gl: WebGLRenderingContext) {
 	return texture
 }
 
-const fGl_renderProg = createProgram(fGl, `
+const renderProgram = createProgram(gl, `
 uniform sampler2D u_particles;
 
 attribute float a_idx;
@@ -107,7 +106,7 @@ void main() {
 }
 `)
 
-const fGl_internalsProg = createProgram(fGl, `
+const renderInternalsProgram = createProgram(gl, `
 attribute vec2 a_pos;
 
 void main() {
@@ -120,9 +119,9 @@ void main() {
 	gl_FragColor = vec4(texture2D(u_particles, gl_FragCoord.xy / vec2(${SQRT_PARTICLE_COUNT * 2}., ${SQRT_PARTICLE_COUNT}.) / 4., 0.).xyz, 1.);
 }
 `)
-fGl.bindAttribLocation(fGl_internalsProg, 0, "a_pos")
+gl.bindAttribLocation(renderInternalsProgram, 0, "a_pos")
 
-const fGl_particleProg = createProgram(fGl, `
+const updateProgram = createProgram(gl, `
 attribute vec2 a_pos;
 
 void main() {
@@ -158,97 +157,72 @@ void main() {
 	gl_FragColor = vec4(highPos.xy, lowPos.x, 1.) * (1. - odd) + vec4(pv.zw, lowPos.y, 1.) * odd;
 }
 `)
-fGl.bindAttribLocation(fGl_particleProg, 0, "a_pos")
-
-vGl.useProgram(createProgram(vGl, `#version 300 es
-in vec2 a_pos;
-
-void main() {
-	gl_Position = vec4(a_pos, 0., 1.);
-}
-`,`#version 300 es
-precision highp float;
-
-out vec4 c;
-
-void main() {
-	c = vec4(1., 0., 1., 1.);
-}
-`))
+gl.bindAttribLocation(updateProgram, 0, "a_pos")
 
 const screenVertBuff = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1])
 
-const fParticleBuff = fGl.createBuffer()
-fGl.bindBuffer(fGl.ARRAY_BUFFER, fParticleBuff)
-fGl.bufferData(fGl.ARRAY_BUFFER, screenVertBuff, fGl.STATIC_DRAW)
-fGl.useProgram(fGl_particleProg)
-fGl.enableVertexAttribArray(getAttribLoc(fGl, "a_pos"))
-fGl.vertexAttribPointer(getAttribLoc(fGl, "a_pos"), 2, fGl.FLOAT, false, 0, 0)
+const particleBuff = gl.createBuffer()
+gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
+gl.bufferData(gl.ARRAY_BUFFER, screenVertBuff, gl.STATIC_DRAW)
+gl.useProgram(updateProgram)
+gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
+gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
 
-const fIdxBuff = fGl.createBuffer()
-fGl.bindBuffer(fGl.ARRAY_BUFFER, fIdxBuff)
-fGl.bufferData(fGl.ARRAY_BUFFER, new Float32Array([...new Array(PARTICLE_COUNT).keys()].flatMap((_e, i) => { i *= 4; return [i, i+1, i+2, i+2, i+1, i+3] })), fGl.STATIC_DRAW)
-fGl.useProgram(fGl_renderProg)
-fGl.enableVertexAttribArray(getAttribLoc(fGl, "a_idx"))
-fGl.vertexAttribPointer(getAttribLoc(fGl, "a_idx"), 1, fGl.FLOAT, false, 0, 0)
+const idxBuff = gl.createBuffer()
+gl.bindBuffer(gl.ARRAY_BUFFER, idxBuff)
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([...new Array(PARTICLE_COUNT).keys()].flatMap((_e, i) => { i *= 4; return [i, i+1, i+2, i+2, i+1, i+3] })), gl.STATIC_DRAW)
+gl.useProgram(renderProgram)
+gl.enableVertexAttribArray(getAttribLoc(gl, "a_idx"))
+gl.vertexAttribPointer(getAttribLoc(gl, "a_idx"), 1, gl.FLOAT, false, 0, 0)
 
-const fGl_texs:WebGLTexture[] = []
-const fGl_fbos:WebGLFramebuffer[] = []
-let fGl_tick = 0
+const textures:WebGLTexture[] = []
+const frameBuffers:WebGLFramebuffer[] = []
+let tickCount = 0
 for (const i of [0,1]) {
-	const texture = createParticleTexture(fGl)!
-	fGl_texs[i] = texture
+	const texture = createParticleTexture(gl)!
+	textures[i] = texture
 
-	const fbo = fGl.createFramebuffer()!
-	fGl_fbos[i] = fbo
-	fGl.bindFramebuffer(fGl.FRAMEBUFFER, fbo)
-	fGl.framebufferTexture2D(fGl.FRAMEBUFFER, fGl.COLOR_ATTACHMENT0, fGl.TEXTURE_2D, texture, 0)
+	const fbo = gl.createFramebuffer()!
+	frameBuffers[i] = fbo
+	gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
 }
 
-fGl.clearColor(0,0,0,1)
-function fGlLoop() {
-	fGl.bindFramebuffer(fGl.FRAMEBUFFER, fGl_fbos[fGl_tick % fGl_fbos.length]!)
-	fGl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2, SQRT_PARTICLE_COUNT)
-	fGl.useProgram(fGl_particleProg)
-	fGl.bindTexture(fGl.TEXTURE_2D, fGl_texs[(fGl_tick + 1) % fGl_texs.length]!)
-	fGl.bindBuffer(fGl.ARRAY_BUFFER, fParticleBuff)
-	fGl.enableVertexAttribArray(getAttribLoc(fGl, "a_pos"))
-	fGl.vertexAttribPointer(getAttribLoc(fGl, "a_pos"), 2, fGl.FLOAT, false, 0, 0)
-	fGl.drawArrays(fGl.TRIANGLE_STRIP, 0, 4)
+gl.clearColor(0,0,0,1)
+function renderLoop() {
+	gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuffers[tickCount % frameBuffers.length]!)
+	gl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2, SQRT_PARTICLE_COUNT)
+	gl.useProgram(updateProgram)
+	gl.bindTexture(gl.TEXTURE_2D, textures[(tickCount + 1) % textures.length]!)
+	gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
+	gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
+	gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
+	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
-	fGl.bindFramebuffer(fGl.FRAMEBUFFER, null)
-	fGl.viewport(0, 0, fGl.canvas.width, fGl.canvas.height)
-	fGl.clear(fGl.COLOR_BUFFER_BIT)
-	fGl.enable(fGl.BLEND)
-	fGl.blendEquation(fGl.FUNC_ADD)
-	fGl.blendFunc(fGl.ONE, fGl.ONE)
-	fGl.useProgram(fGl_renderProg)
-	fGl.bindTexture(fGl.TEXTURE_2D, fGl_texs[fGl_tick % fGl_texs.length]!)
-	fGl.bindBuffer(fGl.ARRAY_BUFFER, fIdxBuff)
-	fGl.enableVertexAttribArray(getAttribLoc(fGl, "a_idx"))
-	fGl.vertexAttribPointer(getAttribLoc(fGl, "a_idx"), 1, fGl.FLOAT, false, 0, 0)
-	fGl.drawArrays(fGl.TRIANGLES, 0, PARTICLE_COUNT * 6)
-	fGl.disable(fGl.BLEND)
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+	gl.viewport(0, 0, gl.canvas.width, gl.canvas.height)
+	gl.clear(gl.COLOR_BUFFER_BIT)
+	gl.enable(gl.BLEND)
+	gl.blendEquation(gl.FUNC_ADD)
+	gl.blendFunc(gl.ONE, gl.ONE)
+	gl.useProgram(renderProgram)
+	gl.bindTexture(gl.TEXTURE_2D, textures[tickCount % textures.length]!)
+	gl.bindBuffer(gl.ARRAY_BUFFER, idxBuff)
+	gl.enableVertexAttribArray(getAttribLoc(gl, "a_idx"))
+	gl.vertexAttribPointer(getAttribLoc(gl, "a_idx"), 1, gl.FLOAT, false, 0, 0)
+	gl.drawArrays(gl.TRIANGLES, 0, PARTICLE_COUNT * 6)
+	gl.disable(gl.BLEND)
 
-	fGl.bindFramebuffer(fGl.FRAMEBUFFER, null)
-	fGl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2 * 4, SQRT_PARTICLE_COUNT * 4)
-	fGl.useProgram(fGl_internalsProg)
-	fGl.bindBuffer(fGl.ARRAY_BUFFER, fParticleBuff)
-	fGl.enableVertexAttribArray(getAttribLoc(fGl, "a_pos"))
-	fGl.vertexAttribPointer(getAttribLoc(fGl, "a_pos"), 2, fGl.FLOAT, false, 0, 0)
-	fGl.bindTexture(fGl.TEXTURE_2D, fGl_texs[fGl_tick % fGl_texs.length]!)
-	fGl.drawArrays(fGl.TRIANGLE_STRIP, 0, 4)
+	gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+	gl.viewport(0, 0, SQRT_PARTICLE_COUNT * 2 * 4, SQRT_PARTICLE_COUNT * 4)
+	gl.useProgram(renderInternalsProgram)
+	gl.bindBuffer(gl.ARRAY_BUFFER, particleBuff)
+	gl.enableVertexAttribArray(getAttribLoc(gl, "a_pos"))
+	gl.vertexAttribPointer(getAttribLoc(gl, "a_pos"), 2, gl.FLOAT, false, 0, 0)
+	gl.bindTexture(gl.TEXTURE_2D, textures[tickCount % textures.length]!)
+	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
 
-	++fGl_tick
-	requestAnimationFrame(fGlLoop)
+	++tickCount
+	requestAnimationFrame(renderLoop)
 }
-fGlLoop()
-
-const vVao = vGl.createVertexArray()
-vGl.bindVertexArray(vVao)
-const vBuff = vGl.createBuffer()
-vGl.bindBuffer(vGl.ARRAY_BUFFER, vBuff)
-vGl.bufferData(vGl.ARRAY_BUFFER, screenVertBuff, fGl.STATIC_DRAW)
-vGl.enableVertexAttribArray(getAttribLoc(vGl, "a_pos"))
-vGl.vertexAttribPointer(getAttribLoc(vGl, "a_pos"), 2, vGl.FLOAT, false, 0, 0)
-vGl.drawArrays(vGl.TRIANGLE_STRIP, 0, 4)
+renderLoop()
