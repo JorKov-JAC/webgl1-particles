@@ -16,7 +16,7 @@ That doesn't scratch the itch. I want the full, cursèd experience of doing comp
 
 Nope. There are only 8 bits per channel. That might be fine velocity, but for position? Particles need more than a 256x256 grid, otherwise they need to move really fast (otherwise they won't be able to escape their grid's cell; if they don't have enough speed to leave their current grid position, any incremental progress would get truncated back to 0 and they'd stay in the same place). 16 bits, giving us a 65536x65536 grid, would be better.
 
-So we'll use two adjacent pixels per particle in an 8-bit RGB texture! The left pixel stores the high bytes of the X/Y position as red/green and the X velocity as blue. The right pixel stores the low bytes in red/green and the Y velocity as blue.
+So we'll use two adjacent pixels per particle in an 8-bit RGB texture! The left pixel stores the high bytes of the X/Y position as red/green and the low byte of the X position as blue. The right pixel stores the bytes for the X/Y velocity in red/green and the low byte of the Y position as blue.
 
 For illustration, this data texture is shown as a hypnotic collection of colours in the corner of the screen.
 
